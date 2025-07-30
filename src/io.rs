@@ -160,3 +160,48 @@ impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io::WriteRe
         }
     }
 }
+
+// embedded-io-async implementations for SerialPort
+impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io_async::Read
+    for SerialPort<'_, Bus, RS, WS>
+{
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        // For USB serial, we don't have real async support since it's interrupt driven
+        // So we just do a blocking read
+        self.read(buf).map_err(From::from)
+    }
+}
+
+impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io_async::Write
+    for SerialPort<'_, Bus, RS, WS>
+{
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        self.write(buf).map_err(From::from)
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.flush().map_err(From::from)
+    }
+}
+
+// embedded-io-async implementations for SerialReader
+impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io_async::Read
+    for crate::SerialReader<'_, Bus, RS, WS>
+{
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        self.read(buf).map_err(From::from)
+    }
+}
+
+// embedded-io-async implementations for SerialWriter
+impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io_async::Write
+    for crate::SerialWriter<'_, Bus, RS, WS>
+{
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        self.write(buf).map_err(From::from)
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.flush().map_err(From::from)
+    }
+}

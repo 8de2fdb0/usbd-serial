@@ -478,6 +478,69 @@ where
     }
 }
 
+// UsbClass implementations for split types
+impl<B, RS, WS> UsbClass<B> for SerialReader<'_, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    fn get_configuration_descriptors(&self, writer: &mut DescriptorWriter) -> Result<()> {
+        unsafe { (*self.serial_port).get_configuration_descriptors(writer) }
+    }
+
+    fn get_string(&self, index: StringIndex, lang_id: LangID) -> Option<&str> {
+        unsafe { (*self.serial_port).get_string(index, lang_id) }
+    }
+
+    fn reset(&mut self) {
+        unsafe { (*self.serial_port).reset() }
+    }
+
+    fn endpoint_in_complete(&mut self, addr: EndpointAddress) {
+        unsafe { (*self.serial_port).endpoint_in_complete(addr) }
+    }
+
+    fn control_in(&mut self, xfer: ControlIn<B>) {
+        unsafe { (*self.serial_port).control_in(xfer) }
+    }
+
+    fn control_out(&mut self, xfer: ControlOut<B>) {
+        unsafe { (*self.serial_port).control_out(xfer) }
+    }
+}
+
+impl<B, RS, WS> UsbClass<B> for SerialWriter<'_, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    fn get_configuration_descriptors(&self, writer: &mut DescriptorWriter) -> Result<()> {
+        unsafe { (*self.serial_port).get_configuration_descriptors(writer) }
+    }
+
+    fn get_string(&self, index: StringIndex, lang_id: LangID) -> Option<&str> {
+        unsafe { (*self.serial_port).get_string(index, lang_id) }
+    }
+
+    fn reset(&mut self) {
+        unsafe { (*self.serial_port).reset() }
+    }
+
+    fn endpoint_in_complete(&mut self, addr: EndpointAddress) {
+        unsafe { (*self.serial_port).endpoint_in_complete(addr) }
+    }
+
+    fn control_in(&mut self, xfer: ControlIn<B>) {
+        unsafe { (*self.serial_port).control_in(xfer) }
+    }
+
+    fn control_out(&mut self, xfer: ControlOut<B>) {
+        unsafe { (*self.serial_port).control_out(xfer) }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
