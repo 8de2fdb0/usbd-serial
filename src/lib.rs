@@ -16,7 +16,7 @@
 //! Both split handles (`SerialReader` and `SerialWriter`) implement:
 //! - [`UsbClass`] - Allowing them to be used independently in USB device polling loops
 //! - `embedded_io` traits - For synchronous I/O operations
-//! - `embedded_io_async` traits - For asynchronous I/O operations
+//! - `embedded_io_async` traits - For asynchronous I/O operations (requires `async` feature)
 //!
 //! Example
 //! =======
@@ -117,5 +117,6 @@ pub use crate::buffer::DefaultBufferStore;
 pub use crate::cdc_acm::*;
 pub use crate::serial_port::*;
 pub use embedded_io;
+#[cfg(feature = "async")]
 pub use embedded_io_async;
 pub use usb_device::{Result, UsbError};

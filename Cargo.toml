@@ -9,9 +9,12 @@ license = "MIT"
 authors = ["Matti Virkkunen <mvirkkunen@gmail.com>"]
 repository = "https://github.com/mvirkkunen/usbd-serial"
 
+[features]
+async = ["embedded-io-async"]
+
 [dependencies]
 embedded-hal = "0.2.4"
 nb = "1"
 usb-device = "0.3"
 embedded-io = "0.6"
-embedded-io-async = "0.6"
+embedded-io-async = { version = "0.6", optional = true }

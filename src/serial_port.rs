@@ -564,4 +564,87 @@ mod tests {
             unreachable!()
         }
     }
+
+    #[test]
+    fn test_split_types_implement_traits() {
+        // Test that split types implement the expected traits
+        // This is a compile-time test to ensure trait implementations exist
+        
+        fn check_reader_traits<B: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>>(
+            _reader: &SerialReader<'_, B, RS, WS>
+        ) {
+            // Ensure SerialReader implements expected traits
+            fn _check_usb_class<T: UsbClass<B>, B: UsbBus>(_: &T) {}
+            fn _check_embedded_io_error<T: embedded_io::ErrorType>(_: &T) {}
+            fn _check_embedded_io_read<T: embedded_io::Read>(_: &T) {}
+            fn _check_embedded_io_read_ready<T: embedded_io::ReadReady>(_: &T) {}
+            fn _check_embedded_hal_read<T: embedded_hal::serial::Read<u8>>(_: &T) {}
+            
+            // These checks would fail to compile if traits aren't implemented
+            _check_usb_class(_reader);
+            _check_embedded_io_error(_reader);
+            _check_embedded_io_read(_reader);
+            _check_embedded_io_read_ready(_reader);
+            _check_embedded_hal_read(_reader);
+        }
+        
+        fn check_writer_traits<B: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>>(
+            _writer: &SerialWriter<'_, B, RS, WS>
+        ) {
+            // Ensure SerialWriter implements expected traits
+            fn _check_usb_class<T: UsbClass<B>, B: UsbBus>(_: &T) {}
+            fn _check_embedded_io_error<T: embedded_io::ErrorType>(_: &T) {}
+            fn _check_embedded_io_write<T: embedded_io::Write>(_: &T) {}
+            fn _check_embedded_io_write_ready<T: embedded_io::WriteReady>(_: &T) {}
+            fn _check_embedded_hal_write<T: embedded_hal::serial::Write<u8>>(_: &T) {}
+            
+            // These checks would fail to compile if traits aren't implemented
+            _check_usb_class(_writer);
+            _check_embedded_io_error(_writer);
+            _check_embedded_io_write(_writer);
+            _check_embedded_io_write_ready(_writer);
+            _check_embedded_hal_write(_writer);
+        }
+        
+        // Compile-time test - function bodies are never executed
+        fn _never_runs() -> ! {
+            unreachable!()
+        }
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn test_async_traits_compile() {
+        // Test that async traits are implemented when the async feature is enabled
+        // This is a compile-time test to ensure async trait implementations exist
+        
+        fn check_serial_port_async<B: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>>(
+            _port: &SerialPort<'_, B, RS, WS>
+        ) {
+            fn _check_async_read<T: embedded_io_async::Read>(_: &T) {}
+            fn _check_async_write<T: embedded_io_async::Write>(_: &T) {}
+            
+            _check_async_read(_port);
+            _check_async_write(_port);
+        }
+        
+        fn check_reader_async<B: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>>(
+            _reader: &SerialReader<'_, B, RS, WS>
+        ) {
+            fn _check_async_read<T: embedded_io_async::Read>(_: &T) {}
+            _check_async_read(_reader);
+        }
+        
+        fn check_writer_async<B: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>>(
+            _writer: &SerialWriter<'_, B, RS, WS>
+        ) {
+            fn _check_async_write<T: embedded_io_async::Write>(_: &T) {}
+            _check_async_write(_writer);
+        }
+        
+        // Compile-time test - function bodies are never executed
+        fn _never_runs() -> ! {
+            unreachable!()
+        }
+    }
 }

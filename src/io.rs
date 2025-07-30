@@ -162,6 +162,7 @@ impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io::WriteRe
 }
 
 // embedded-io-async implementations for SerialPort
+#[cfg(feature = "async")]
 impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io_async::Read
     for SerialPort<'_, Bus, RS, WS>
 {
@@ -172,6 +173,7 @@ impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io_async::R
     }
 }
 
+#[cfg(feature = "async")]
 impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io_async::Write
     for SerialPort<'_, Bus, RS, WS>
 {
@@ -185,6 +187,7 @@ impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io_async::W
 }
 
 // embedded-io-async implementations for SerialReader
+#[cfg(feature = "async")]
 impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io_async::Read
     for crate::SerialReader<'_, Bus, RS, WS>
 {
@@ -194,6 +197,7 @@ impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io_async::R
 }
 
 // embedded-io-async implementations for SerialWriter
+#[cfg(feature = "async")]
 impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io_async::Write
     for crate::SerialWriter<'_, Bus, RS, WS>
 {
