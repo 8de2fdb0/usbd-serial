@@ -34,7 +34,7 @@ impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io::Read
 {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         loop {
-            match self.read(buf).map_err(From::from) {
+            match self.read(buf) {
                 // We are required by `embedded-io` to continue reading until at least one byte is
                 // read.
                 Ok(0) => {}
@@ -98,7 +98,7 @@ impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io::Read
 {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         loop {
-            match self.read(buf).map_err(From::from) {
+            match self.read(buf) {
                 // We are required by `embedded-io` to continue reading until at least one byte is
                 // read.
                 Ok(0) => {}
@@ -155,9 +155,7 @@ impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io::WriteRe
     for crate::SerialWriter<'_, Bus, RS, WS>
 {
     fn write_ready(&mut self) -> Result<bool, Self::Error> {
-        unsafe {
-            Ok((*self.serial_port).write_buf.available_write() != 0)
-        }
+        unsafe { Ok((*self.serial_port).write_buf.available_write() != 0) }
     }
 }
 

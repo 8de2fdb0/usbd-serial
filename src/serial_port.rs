@@ -315,7 +315,7 @@ where
 }
 
 /// Reader handle for split serial port access
-pub struct SerialReader<'a, B, RS = DefaultBufferStore, WS = DefaultBufferStore> 
+pub struct SerialReader<'a, B, RS = DefaultBufferStore, WS = DefaultBufferStore>
 where
     B: UsbBus,
     RS: BorrowMut<[u8]>,
@@ -328,7 +328,7 @@ where
 /// Writer handle for split serial port access
 pub struct SerialWriter<'a, B, RS = DefaultBufferStore, WS = DefaultBufferStore>
 where
-    B: UsbBus, 
+    B: UsbBus,
     RS: BorrowMut<[u8]>,
     WS: BorrowMut<[u8]>,
 {
@@ -343,44 +343,47 @@ where
     WS: BorrowMut<[u8]>,
 {
     /// Split the serial port into separate reader and writer handles.
-    /// 
+    ///
     /// This allows concurrent reading and writing operations. The split is safe because
     /// the reader only accesses the read buffer and read-related USB operations,
     /// while the writer only accesses the write buffer and write-related USB operations.
-    /// 
+    ///
     /// Note: This consumes the SerialPort. To get it back, both handles must be
     /// passed to `unsplit()`.
     pub fn split(mut self) -> (SerialReader<'a, B, RS, WS>, SerialWriter<'a, B, RS, WS>) {
         let serial_ptr = &mut self as *mut SerialPort<'a, B, RS, WS>;
-        
+
         // Leak the SerialPort so it doesn't get dropped
         core::mem::forget(self);
-        
+
         let reader = SerialReader {
             serial_port: serial_ptr,
             _phantom: core::marker::PhantomData,
         };
-        
+
         let writer = SerialWriter {
             serial_port: serial_ptr,
             _phantom: core::marker::PhantomData,
         };
-        
+
         (reader, writer)
     }
-    
+
     /// Combine reader and writer handles back into a SerialPort
-    pub fn unsplit(reader: SerialReader<'a, B, RS, WS>, writer: SerialWriter<'a, B, RS, WS>) -> Self {
+    pub fn unsplit(
+        reader: SerialReader<'a, B, RS, WS>,
+        writer: SerialWriter<'a, B, RS, WS>,
+    ) -> Self {
         // Ensure both handles point to the same SerialPort
         assert_eq!(reader.serial_port, writer.serial_port);
-        
+
         // Reconstruct the SerialPort from the pointer
         let serial_port = unsafe { core::ptr::read(reader.serial_port) };
-        
+
         // Forget the handles so they don't try to drop the SerialPort
-        core::mem::forget(reader);
-        core::mem::forget(writer);
-        
+        let _ = core::mem::ManuallyDrop::new(reader);
+        let _ = core::mem::ManuallyDrop::new(writer);
+
         serial_port
     }
 }
@@ -399,9 +402,7 @@ where
     ///
     /// Other errors from `usb-device` may also be propagated.
     pub fn read(&mut self, data: &mut [u8]) -> Result<usize> {
-        unsafe { 
-            (*self.serial_port).read(data)
-        }
+        unsafe { (*self.serial_port).read(data) }
     }
 }
 
@@ -420,16 +421,12 @@ where
     ///
     /// Other errors from `usb-device` may also be propagated.
     pub fn write(&mut self, data: &[u8]) -> Result<usize> {
-        unsafe {
-            (*self.serial_port).write(data)
-        }
+        unsafe { (*self.serial_port).write(data) }
     }
-    
+
     /// Flush the write buffer
     pub fn flush(&mut self) -> Result<()> {
-        unsafe {
-            (*self.serial_port).flush()
-        }
+        unsafe { (*self.serial_port).flush() }
     }
 }
 
@@ -447,7 +444,7 @@ where
 
         match <SerialReader<'_, B, RS, WS>>::read(self, slice::from_mut(&mut buf)) {
             Ok(0) | Err(UsbError::WouldBlock) => Err(nb::Error::WouldBlock),
-            Ok(_) => Ok(buf), 
+            Ok(_) => Ok(buf),
             Err(err) => Err(nb::Error::Other(err)),
         }
     }
@@ -544,20 +541,21 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     // This is a simple compile-time test to ensure the split functionality compiles
     // We can't test the actual USB functionality without a mock USB bus
     #[test]
     fn test_split_compiles() {
         // This test just ensures that the split/unsplit API compiles correctly
         // We can't actually test functionality without a real or mock USB bus
-        
+
         // The test ensures the types are correctly defined and the methods exist
+        #[allow(dead_code)]
         fn test_split_api<B: UsbBus>(serial: SerialPort<'_, B>) {
             let (reader, writer) = serial.split();
             let _serial_back = SerialPort::unsplit(reader, writer);
         }
-        
+
         // Just ensure the function compiles - it won't actually run without a USB bus
         fn _compile_only() {
             // This function never runs, it just tests compilation
@@ -569,9 +567,10 @@ mod tests {
     fn test_split_types_implement_traits() {
         // Test that split types implement the expected traits
         // This is a compile-time test to ensure trait implementations exist
-        
+
+        #[allow(dead_code)]
         fn check_reader_traits<B: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>>(
-            _reader: &SerialReader<'_, B, RS, WS>
+            _reader: &SerialReader<'_, B, RS, WS>,
         ) {
             // Ensure SerialReader implements expected traits
             fn _check_usb_class<T: UsbClass<B>, B: UsbBus>(_: &T) {}
@@ -579,7 +578,7 @@ mod tests {
             fn _check_embedded_io_read<T: embedded_io::Read>(_: &T) {}
             fn _check_embedded_io_read_ready<T: embedded_io::ReadReady>(_: &T) {}
             fn _check_embedded_hal_read<T: embedded_hal::serial::Read<u8>>(_: &T) {}
-            
+
             // These checks would fail to compile if traits aren't implemented
             _check_usb_class(_reader);
             _check_embedded_io_error(_reader);
@@ -587,9 +586,10 @@ mod tests {
             _check_embedded_io_read_ready(_reader);
             _check_embedded_hal_read(_reader);
         }
-        
+
+        #[allow(dead_code)]
         fn check_writer_traits<B: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>>(
-            _writer: &SerialWriter<'_, B, RS, WS>
+            _writer: &SerialWriter<'_, B, RS, WS>,
         ) {
             // Ensure SerialWriter implements expected traits
             fn _check_usb_class<T: UsbClass<B>, B: UsbBus>(_: &T) {}
@@ -597,7 +597,7 @@ mod tests {
             fn _check_embedded_io_write<T: embedded_io::Write>(_: &T) {}
             fn _check_embedded_io_write_ready<T: embedded_io::WriteReady>(_: &T) {}
             fn _check_embedded_hal_write<T: embedded_hal::serial::Write<u8>>(_: &T) {}
-            
+
             // These checks would fail to compile if traits aren't implemented
             _check_usb_class(_writer);
             _check_embedded_io_error(_writer);
@@ -605,7 +605,7 @@ mod tests {
             _check_embedded_io_write_ready(_writer);
             _check_embedded_hal_write(_writer);
         }
-        
+
         // Compile-time test - function bodies are never executed
         fn _never_runs() -> ! {
             unreachable!()
@@ -617,31 +617,34 @@ mod tests {
     fn test_async_traits_compile() {
         // Test that async traits are implemented when the async feature is enabled
         // This is a compile-time test to ensure async trait implementations exist
-        
+
+        #[allow(dead_code)]
         fn check_serial_port_async<B: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>>(
-            _port: &SerialPort<'_, B, RS, WS>
+            _port: &SerialPort<'_, B, RS, WS>,
         ) {
             fn _check_async_read<T: embedded_io_async::Read>(_: &T) {}
             fn _check_async_write<T: embedded_io_async::Write>(_: &T) {}
-            
+
             _check_async_read(_port);
             _check_async_write(_port);
         }
-        
+
+        #[allow(dead_code)]
         fn check_reader_async<B: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>>(
-            _reader: &SerialReader<'_, B, RS, WS>
+            _reader: &SerialReader<'_, B, RS, WS>,
         ) {
             fn _check_async_read<T: embedded_io_async::Read>(_: &T) {}
             _check_async_read(_reader);
         }
-        
+
+        #[allow(dead_code)]
         fn check_writer_async<B: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>>(
-            _writer: &SerialWriter<'_, B, RS, WS>
+            _writer: &SerialWriter<'_, B, RS, WS>,
         ) {
             fn _check_async_write<T: embedded_io_async::Write>(_: &T) {}
             _check_async_write(_writer);
         }
-        
+
         // Compile-time test - function bodies are never executed
         fn _never_runs() -> ! {
             unreachable!()
