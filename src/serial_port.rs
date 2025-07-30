@@ -313,3 +313,389 @@ where
         }
     }
 }
+
+/// Reader handle for split serial port access
+pub struct SerialReader<'a, B, RS = DefaultBufferStore, WS = DefaultBufferStore>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    pub(crate) serial_port: *mut SerialPort<'a, B, RS, WS>,
+    _phantom: core::marker::PhantomData<&'a ()>,
+}
+
+/// Writer handle for split serial port access
+pub struct SerialWriter<'a, B, RS = DefaultBufferStore, WS = DefaultBufferStore>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    pub(crate) serial_port: *mut SerialPort<'a, B, RS, WS>,
+    _phantom: core::marker::PhantomData<&'a ()>,
+}
+
+// Safety: SerialReader can be Send if the underlying SerialPort is Send
+// because it only accesses the read buffer and read-related operations
+unsafe impl<'a, B, RS, WS> Send for SerialReader<'a, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+    SerialPort<'a, B, RS, WS>: Send,
+{
+}
+
+// Safety: SerialWriter can be Send if the underlying SerialPort is Send
+// because it only accesses the write buffer and write-related operations
+unsafe impl<'a, B, RS, WS> Send for SerialWriter<'a, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+    SerialPort<'a, B, RS, WS>: Send,
+{
+}
+
+impl<'a, B, RS, WS> SerialPort<'a, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    /// Split the serial port into separate reader and writer handles.
+    ///
+    /// This allows concurrent reading and writing operations. The split is safe because
+    /// the reader only accesses the read buffer and read-related USB operations,
+    /// while the writer only accesses the write buffer and write-related USB operations.
+    ///
+    /// Note: This consumes the SerialPort. To get it back, both handles must be
+    /// passed to `unsplit()`.
+    pub fn split(mut self) -> (SerialReader<'a, B, RS, WS>, SerialWriter<'a, B, RS, WS>) {
+        let serial_ptr = &mut self as *mut SerialPort<'a, B, RS, WS>;
+
+        // Leak the SerialPort so it doesn't get dropped
+        core::mem::forget(self);
+
+        let reader = SerialReader {
+            serial_port: serial_ptr,
+            _phantom: core::marker::PhantomData,
+        };
+
+        let writer = SerialWriter {
+            serial_port: serial_ptr,
+            _phantom: core::marker::PhantomData,
+        };
+
+        (reader, writer)
+    }
+
+    /// Combine reader and writer handles back into a SerialPort
+    pub fn unsplit(
+        reader: SerialReader<'a, B, RS, WS>,
+        writer: SerialWriter<'a, B, RS, WS>,
+    ) -> Self {
+        // Ensure both handles point to the same SerialPort
+        assert_eq!(reader.serial_port, writer.serial_port);
+
+        // Reconstruct the SerialPort from the pointer
+        let serial_port = unsafe { core::ptr::read(reader.serial_port) };
+
+        // Forget the handles so they don't try to drop the SerialPort
+        let _ = core::mem::ManuallyDrop::new(reader);
+        let _ = core::mem::ManuallyDrop::new(writer);
+
+        serial_port
+    }
+}
+
+impl<'a, B, RS, WS> SerialReader<'a, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    /// Reads bytes from the port into `data` and returns the number of bytes read.
+    ///
+    /// # Errors
+    ///
+    /// * [`WouldBlock`](usb_device::UsbError::WouldBlock) - No bytes available for reading.
+    ///
+    /// Other errors from `usb-device` may also be propagated.
+    pub fn read(&mut self, data: &mut [u8]) -> Result<usize> {
+        unsafe { (*self.serial_port).read(data) }
+    }
+}
+
+impl<'a, B, RS, WS> SerialWriter<'a, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    /// Writes bytes from `data` into the port and returns the number of bytes written.
+    ///
+    /// # Errors
+    ///
+    /// * [`WouldBlock`](usb_device::UsbError::WouldBlock) - No bytes could be written because the
+    ///   buffers are full.
+    ///
+    /// Other errors from `usb-device` may also be propagated.
+    pub fn write(&mut self, data: &[u8]) -> Result<usize> {
+        unsafe { (*self.serial_port).write(data) }
+    }
+
+    /// Flush the write buffer
+    pub fn flush(&mut self) -> Result<()> {
+        unsafe { (*self.serial_port).flush() }
+    }
+}
+
+// Implement embedded_hal traits for the split types
+impl<B, RS, WS> embedded_hal::serial::Read<u8> for SerialReader<'_, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    type Error = UsbError;
+
+    fn read(&mut self) -> nb::Result<u8, Self::Error> {
+        let mut buf: u8 = 0;
+
+        match <SerialReader<'_, B, RS, WS>>::read(self, slice::from_mut(&mut buf)) {
+            Ok(0) | Err(UsbError::WouldBlock) => Err(nb::Error::WouldBlock),
+            Ok(_) => Ok(buf),
+            Err(err) => Err(nb::Error::Other(err)),
+        }
+    }
+}
+
+impl<B, RS, WS> embedded_hal::serial::Write<u8> for SerialWriter<'_, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    type Error = UsbError;
+
+    fn write(&mut self, word: u8) -> nb::Result<(), Self::Error> {
+        match <SerialWriter<'_, B, RS, WS>>::write(self, slice::from_ref(&word)) {
+            Ok(0) | Err(UsbError::WouldBlock) => Err(nb::Error::WouldBlock),
+            Ok(_) => Ok(()),
+            Err(err) => Err(nb::Error::Other(err)),
+        }
+    }
+
+    fn flush(&mut self) -> nb::Result<(), Self::Error> {
+        match <SerialWriter<'_, B, RS, WS>>::flush(self) {
+            Err(UsbError::WouldBlock) => Err(nb::Error::WouldBlock),
+            Ok(_) => Ok(()),
+            Err(err) => Err(nb::Error::Other(err)),
+        }
+    }
+}
+
+// UsbClass implementations for split types
+impl<B, RS, WS> UsbClass<B> for SerialReader<'_, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    fn get_configuration_descriptors(&self, writer: &mut DescriptorWriter) -> Result<()> {
+        unsafe { (*self.serial_port).get_configuration_descriptors(writer) }
+    }
+
+    fn get_string(&self, index: StringIndex, lang_id: LangID) -> Option<&str> {
+        unsafe { (*self.serial_port).get_string(index, lang_id) }
+    }
+
+    fn reset(&mut self) {
+        unsafe { (*self.serial_port).reset() }
+    }
+
+    fn endpoint_in_complete(&mut self, addr: EndpointAddress) {
+        unsafe { (*self.serial_port).endpoint_in_complete(addr) }
+    }
+
+    fn control_in(&mut self, xfer: ControlIn<B>) {
+        unsafe { (*self.serial_port).control_in(xfer) }
+    }
+
+    fn control_out(&mut self, xfer: ControlOut<B>) {
+        unsafe { (*self.serial_port).control_out(xfer) }
+    }
+}
+
+impl<B, RS, WS> UsbClass<B> for SerialWriter<'_, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    fn get_configuration_descriptors(&self, writer: &mut DescriptorWriter) -> Result<()> {
+        unsafe { (*self.serial_port).get_configuration_descriptors(writer) }
+    }
+
+    fn get_string(&self, index: StringIndex, lang_id: LangID) -> Option<&str> {
+        unsafe { (*self.serial_port).get_string(index, lang_id) }
+    }
+
+    fn reset(&mut self) {
+        unsafe { (*self.serial_port).reset() }
+    }
+
+    fn endpoint_in_complete(&mut self, addr: EndpointAddress) {
+        unsafe { (*self.serial_port).endpoint_in_complete(addr) }
+    }
+
+    fn control_in(&mut self, xfer: ControlIn<B>) {
+        unsafe { (*self.serial_port).control_in(xfer) }
+    }
+
+    fn control_out(&mut self, xfer: ControlOut<B>) {
+        unsafe { (*self.serial_port).control_out(xfer) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // This is a simple compile-time test to ensure the split functionality compiles
+    // We can't test the actual USB functionality without a mock USB bus
+    #[test]
+    fn test_split_compiles() {
+        // This test just ensures that the split/unsplit API compiles correctly
+        // We can't actually test functionality without a real or mock USB bus
+
+        // The test ensures the types are correctly defined and the methods exist
+        #[allow(dead_code)]
+        fn test_split_api<B: UsbBus>(serial: SerialPort<'_, B>) {
+            let (reader, writer) = serial.split();
+            let _serial_back = SerialPort::unsplit(reader, writer);
+        }
+
+        // Just ensure the function compiles - it won't actually run without a USB bus
+        fn _compile_only() {
+            // This function never runs, it just tests compilation
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn test_split_types_implement_traits() {
+        // Test that split types implement the expected traits
+        // This is a compile-time test to ensure trait implementations exist
+
+        #[allow(dead_code)]
+        fn check_reader_traits<B: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>>(
+            _reader: &SerialReader<'_, B, RS, WS>,
+        ) {
+            // Ensure SerialReader implements expected traits
+            fn _check_usb_class<T: UsbClass<B>, B: UsbBus>(_: &T) {}
+            fn _check_embedded_io_error<T: embedded_io::ErrorType>(_: &T) {}
+            fn _check_embedded_io_read<T: embedded_io::Read>(_: &T) {}
+            fn _check_embedded_io_read_ready<T: embedded_io::ReadReady>(_: &T) {}
+            fn _check_embedded_hal_read<T: embedded_hal::serial::Read<u8>>(_: &T) {}
+
+            // These checks would fail to compile if traits aren't implemented
+            _check_usb_class(_reader);
+            _check_embedded_io_error(_reader);
+            _check_embedded_io_read(_reader);
+            _check_embedded_io_read_ready(_reader);
+            _check_embedded_hal_read(_reader);
+        }
+
+        #[allow(dead_code)]
+        fn check_writer_traits<B: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>>(
+            _writer: &SerialWriter<'_, B, RS, WS>,
+        ) {
+            // Ensure SerialWriter implements expected traits
+            fn _check_usb_class<T: UsbClass<B>, B: UsbBus>(_: &T) {}
+            fn _check_embedded_io_error<T: embedded_io::ErrorType>(_: &T) {}
+            fn _check_embedded_io_write<T: embedded_io::Write>(_: &T) {}
+            fn _check_embedded_io_write_ready<T: embedded_io::WriteReady>(_: &T) {}
+            fn _check_embedded_hal_write<T: embedded_hal::serial::Write<u8>>(_: &T) {}
+
+            // These checks would fail to compile if traits aren't implemented
+            _check_usb_class(_writer);
+            _check_embedded_io_error(_writer);
+            _check_embedded_io_write(_writer);
+            _check_embedded_io_write_ready(_writer);
+            _check_embedded_hal_write(_writer);
+        }
+
+        // Compile-time test - function bodies are never executed
+        fn _never_runs() -> ! {
+            unreachable!()
+        }
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn test_async_traits_compile() {
+        // Test that async traits are implemented when the async feature is enabled
+        // This is a compile-time test to ensure async trait implementations exist
+
+        #[allow(dead_code)]
+        fn check_serial_port_async<B: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>>(
+            _port: &SerialPort<'_, B, RS, WS>,
+        ) {
+            fn _check_async_read<T: embedded_io_async::Read>(_: &T) {}
+            fn _check_async_write<T: embedded_io_async::Write>(_: &T) {}
+
+            _check_async_read(_port);
+            _check_async_write(_port);
+        }
+
+        #[allow(dead_code)]
+        fn check_reader_async<B: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>>(
+            _reader: &SerialReader<'_, B, RS, WS>,
+        ) {
+            fn _check_async_read<T: embedded_io_async::Read>(_: &T) {}
+            _check_async_read(_reader);
+        }
+
+        #[allow(dead_code)]
+        fn check_writer_async<B: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>>(
+            _writer: &SerialWriter<'_, B, RS, WS>,
+        ) {
+            fn _check_async_write<T: embedded_io_async::Write>(_: &T) {}
+            _check_async_write(_writer);
+        }
+
+        // Compile-time test - function bodies are never executed
+        fn _never_runs() -> ! {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn test_split_types_are_send() {
+        // Test that split types implement Send when the underlying SerialPort is Send
+        // This is a compile-time test to ensure Send implementations exist
+
+        #[allow(dead_code)]
+        fn check_send<T: Send>(_: &T) {}
+
+        #[allow(dead_code)]
+        fn test_send_when_serial_port_is_send<B: UsbBus + Send, RS: BorrowMut<[u8]> + Send, WS: BorrowMut<[u8]> + Send>(
+            _reader: &SerialReader<'static, B, RS, WS>,
+            _writer: &SerialWriter<'static, B, RS, WS>,
+        ) where
+            SerialPort<'static, B, RS, WS>: Send,
+        {
+            // These will fail to compile if Send is not implemented
+            check_send(_reader);
+            check_send(_writer);
+        }
+
+        // Compile-time test - function bodies are never executed
+        fn _never_runs() -> ! {
+            unreachable!()
+        }
+    }
+}

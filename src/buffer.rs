@@ -82,9 +82,8 @@ impl<S: BorrowMut<[u8]>> Buffer<S> {
 
         assert!(self.available_write_without_discard() >= max_count);
 
-        f(&mut self.store.borrow_mut()[self.wpos..self.wpos + max_count]).map(|count| {
+        f(&mut self.store.borrow_mut()[self.wpos..self.wpos + max_count]).inspect(|&count| {
             self.wpos += count;
-            count
         })
     }
 
@@ -99,9 +98,8 @@ impl<S: BorrowMut<[u8]>> Buffer<S> {
     ) -> Result<usize, E> {
         let count = cmp::min(max_count, self.available_read());
 
-        f(&self.store.borrow()[self.rpos..self.rpos + count]).map(|count| {
+        f(&self.store.borrow()[self.rpos..self.rpos + count]).inspect(|&count| {
             self.rpos += count;
-            count
         })
     }
 

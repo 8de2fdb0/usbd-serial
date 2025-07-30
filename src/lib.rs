@@ -7,6 +7,17 @@
 //! The crate also contains [`CdcAcmClass`] which is a lower-level implementation that
 //! has less overhead, but requires more care to use correctly.
 //!
+//! ## Split Operation
+//!
+//! The [`SerialPort`] can be split into separate reader and writer handles using the [`SerialPort::split`]
+//! method. This allows concurrent reading and writing operations, which is useful for async operations
+//! and when implementing `embedded-io-async`.
+//!
+//! Both split handles (`SerialReader` and `SerialWriter`) implement:
+//! - [`UsbClass`] - Allowing them to be used independently in USB device polling loops
+//! - `embedded_io` traits - For synchronous I/O operations
+//! - `embedded_io_async` traits - For asynchronous I/O operations (requires `async` feature)
+//!
 //! Example
 //! =======
 //!
@@ -52,6 +63,48 @@
 //! }
 //! # }
 //! ```
+//!
+//! ## Split Example
+//!
+//! ```no_run
+//! # use usb_device::class_prelude::*;
+//! # fn dummy(usb_bus: UsbBusAllocator<impl UsbBus>) {
+//! use usb_device::prelude::*;
+//! use usbd_serial::{SerialPort, USB_CLASS_CDC};
+//!
+//! let serial = SerialPort::new(&usb_bus);
+//! let (mut reader, mut writer) = serial.split();
+//!
+//! let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
+//!     .strings(&[StringDescriptors::new(LangID::EN).product("Serial port")])
+//!     .expect("Failed to set strings")
+//!     .device_class(USB_CLASS_CDC)
+//!     .build();
+//!
+//! loop {
+//!     // Either reader or writer can be used for USB polling
+//!     if !usb_dev.poll(&mut [&mut writer]) {
+//!         continue;
+//!     }
+//!
+//!     // Now you can use reader and writer independently
+//!     let mut buf = [0u8; 64];
+//!     match reader.read(&mut buf) {
+//!         Ok(count) => { /* process read data */ },
+//!         Err(_) => { /* handle error */ },
+//!     }
+//!
+//!     match writer.write(b"Hello") {
+//!         Ok(count) => { /* data written */ },
+//!         Err(_) => { /* handle error */ },
+//!     }
+//! }
+//!
+//! // Recombine when done (optional)
+//! let _serial = SerialPort::unsplit(reader, writer);
+//! # }
+//! ```
+//! ```
 
 #![no_std]
 
@@ -64,4 +117,6 @@ pub use crate::buffer::DefaultBufferStore;
 pub use crate::cdc_acm::*;
 pub use crate::serial_port::*;
 pub use embedded_io;
+#[cfg(feature = "async")]
+pub use embedded_io_async;
 pub use usb_device::{Result, UsbError};
