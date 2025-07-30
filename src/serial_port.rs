@@ -336,6 +336,28 @@ where
     _phantom: core::marker::PhantomData<&'a ()>,
 }
 
+// Safety: SerialReader can be Send if the underlying SerialPort is Send
+// because it only accesses the read buffer and read-related operations
+unsafe impl<'a, B, RS, WS> Send for SerialReader<'a, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+    SerialPort<'a, B, RS, WS>: Send,
+{
+}
+
+// Safety: SerialWriter can be Send if the underlying SerialPort is Send
+// because it only accesses the write buffer and write-related operations
+unsafe impl<'a, B, RS, WS> Send for SerialWriter<'a, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+    SerialPort<'a, B, RS, WS>: Send,
+{
+}
+
 impl<'a, B, RS, WS> SerialPort<'a, B, RS, WS>
 where
     B: UsbBus,
@@ -643,6 +665,32 @@ mod tests {
         ) {
             fn _check_async_write<T: embedded_io_async::Write>(_: &T) {}
             _check_async_write(_writer);
+        }
+
+        // Compile-time test - function bodies are never executed
+        fn _never_runs() -> ! {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn test_split_types_are_send() {
+        // Test that split types implement Send when the underlying SerialPort is Send
+        // This is a compile-time test to ensure Send implementations exist
+
+        #[allow(dead_code)]
+        fn check_send<T: Send>(_: &T) {}
+
+        #[allow(dead_code)]
+        fn test_send_when_serial_port_is_send<B: UsbBus + Send, RS: BorrowMut<[u8]> + Send, WS: BorrowMut<[u8]> + Send>(
+            _reader: &SerialReader<'static, B, RS, WS>,
+            _writer: &SerialWriter<'static, B, RS, WS>,
+        ) where
+            SerialPort<'static, B, RS, WS>: Send,
+        {
+            // These will fail to compile if Send is not implemented
+            check_send(_reader);
+            check_send(_writer);
         }
 
         // Compile-time test - function bodies are never executed
