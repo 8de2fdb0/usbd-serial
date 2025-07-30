@@ -7,6 +7,12 @@
 //! The crate also contains [`CdcAcmClass`] which is a lower-level implementation that
 //! has less overhead, but requires more care to use correctly.
 //!
+//! ## Split Operation
+//!
+//! The [`SerialPort`] can be split into separate reader and writer handles using the [`SerialPort::split`]
+//! method. This allows concurrent reading and writing operations, which is useful for async operations
+//! and when implementing `embedded-io-async`.
+//!
 //! Example
 //! =======
 //!
@@ -51,6 +57,35 @@
 //!     };
 //! }
 //! # }
+//! ```
+//!
+//! ## Split Example
+//!
+//! ```no_run
+//! # use usb_device::class_prelude::*;
+//! # fn dummy(usb_bus: UsbBusAllocator<impl UsbBus>) {
+//! use usb_device::prelude::*;
+//! use usbd_serial::{SerialPort, USB_CLASS_CDC};
+//!
+//! let serial = SerialPort::new(&usb_bus);
+//! let (mut reader, mut writer) = serial.split();
+//!
+//! // Now you can use reader and writer independently
+//! let mut buf = [0u8; 64];
+//! match reader.read(&mut buf) {
+//!     Ok(count) => { /* process read data */ },
+//!     Err(_) => { /* handle error */ },
+//! }
+//!
+//! match writer.write(b"Hello") {
+//!     Ok(count) => { /* data written */ },
+//!     Err(_) => { /* handle error */ },
+//! }
+//!
+//! // Recombine when done (optional)
+//! let _serial = SerialPort::unsplit(reader, writer);
+//! # }
+//! ```
 //! ```
 
 #![no_std]

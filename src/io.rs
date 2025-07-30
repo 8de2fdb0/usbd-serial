@@ -85,3 +85,78 @@ impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io::WriteRe
         Ok(self.write_buf.available_write() != 0)
     }
 }
+
+// embedded-io implementations for SerialReader
+impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io::ErrorType
+    for crate::SerialReader<'_, Bus, RS, WS>
+{
+    type Error = Error;
+}
+
+impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io::Read
+    for crate::SerialReader<'_, Bus, RS, WS>
+{
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        loop {
+            match self.read(buf).map_err(From::from) {
+                // We are required by `embedded-io` to continue reading until at least one byte is
+                // read.
+                Ok(0) => {}
+                Err(usb_device::UsbError::WouldBlock) => {}
+                other => return Ok(other?),
+            }
+        }
+    }
+}
+
+impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io::ReadReady
+    for crate::SerialReader<'_, Bus, RS, WS>
+{
+    fn read_ready(&mut self) -> Result<bool, Self::Error> {
+        unsafe {
+            (*self.serial_port).poll()?;
+            Ok((*self.serial_port).read_buf.available_read() != 0)
+        }
+    }
+}
+
+// embedded-io implementations for SerialWriter
+impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io::ErrorType
+    for crate::SerialWriter<'_, Bus, RS, WS>
+{
+    type Error = Error;
+}
+
+impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io::Write
+    for crate::SerialWriter<'_, Bus, RS, WS>
+{
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        loop {
+            match self.write(buf) {
+                // We are required by `embedded-io` to continue writing until at least one byte is
+                // written.
+                Ok(0) => {}
+                Err(usb_device::UsbError::WouldBlock) => {}
+                other => return Ok(other?),
+            }
+        }
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.flush().map_err(From::from)
+    }
+}
+
+impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io::WriteReady
+    for crate::SerialWriter<'_, Bus, RS, WS>
+{
+    fn write_ready(&mut self) -> Result<bool, Self::Error> {
+        unsafe {
+            Ok((*self.serial_port).write_buf.available_write() != 0)
+        }
+    }
+}

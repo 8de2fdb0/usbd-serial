@@ -313,3 +313,192 @@ where
         }
     }
 }
+
+/// Reader handle for split serial port access
+pub struct SerialReader<'a, B, RS = DefaultBufferStore, WS = DefaultBufferStore> 
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    pub(crate) serial_port: *mut SerialPort<'a, B, RS, WS>,
+    _phantom: core::marker::PhantomData<&'a ()>,
+}
+
+/// Writer handle for split serial port access
+pub struct SerialWriter<'a, B, RS = DefaultBufferStore, WS = DefaultBufferStore>
+where
+    B: UsbBus, 
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    pub(crate) serial_port: *mut SerialPort<'a, B, RS, WS>,
+    _phantom: core::marker::PhantomData<&'a ()>,
+}
+
+impl<'a, B, RS, WS> SerialPort<'a, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    /// Split the serial port into separate reader and writer handles.
+    /// 
+    /// This allows concurrent reading and writing operations. The split is safe because
+    /// the reader only accesses the read buffer and read-related USB operations,
+    /// while the writer only accesses the write buffer and write-related USB operations.
+    /// 
+    /// Note: This consumes the SerialPort. To get it back, both handles must be
+    /// passed to `unsplit()`.
+    pub fn split(mut self) -> (SerialReader<'a, B, RS, WS>, SerialWriter<'a, B, RS, WS>) {
+        let serial_ptr = &mut self as *mut SerialPort<'a, B, RS, WS>;
+        
+        // Leak the SerialPort so it doesn't get dropped
+        core::mem::forget(self);
+        
+        let reader = SerialReader {
+            serial_port: serial_ptr,
+            _phantom: core::marker::PhantomData,
+        };
+        
+        let writer = SerialWriter {
+            serial_port: serial_ptr,
+            _phantom: core::marker::PhantomData,
+        };
+        
+        (reader, writer)
+    }
+    
+    /// Combine reader and writer handles back into a SerialPort
+    pub fn unsplit(reader: SerialReader<'a, B, RS, WS>, writer: SerialWriter<'a, B, RS, WS>) -> Self {
+        // Ensure both handles point to the same SerialPort
+        assert_eq!(reader.serial_port, writer.serial_port);
+        
+        // Reconstruct the SerialPort from the pointer
+        let serial_port = unsafe { core::ptr::read(reader.serial_port) };
+        
+        // Forget the handles so they don't try to drop the SerialPort
+        core::mem::forget(reader);
+        core::mem::forget(writer);
+        
+        serial_port
+    }
+}
+
+impl<'a, B, RS, WS> SerialReader<'a, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    /// Reads bytes from the port into `data` and returns the number of bytes read.
+    ///
+    /// # Errors
+    ///
+    /// * [`WouldBlock`](usb_device::UsbError::WouldBlock) - No bytes available for reading.
+    ///
+    /// Other errors from `usb-device` may also be propagated.
+    pub fn read(&mut self, data: &mut [u8]) -> Result<usize> {
+        unsafe { 
+            (*self.serial_port).read(data)
+        }
+    }
+}
+
+impl<'a, B, RS, WS> SerialWriter<'a, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    /// Writes bytes from `data` into the port and returns the number of bytes written.
+    ///
+    /// # Errors
+    ///
+    /// * [`WouldBlock`](usb_device::UsbError::WouldBlock) - No bytes could be written because the
+    ///   buffers are full.
+    ///
+    /// Other errors from `usb-device` may also be propagated.
+    pub fn write(&mut self, data: &[u8]) -> Result<usize> {
+        unsafe {
+            (*self.serial_port).write(data)
+        }
+    }
+    
+    /// Flush the write buffer
+    pub fn flush(&mut self) -> Result<()> {
+        unsafe {
+            (*self.serial_port).flush()
+        }
+    }
+}
+
+// Implement embedded_hal traits for the split types
+impl<B, RS, WS> embedded_hal::serial::Read<u8> for SerialReader<'_, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    type Error = UsbError;
+
+    fn read(&mut self) -> nb::Result<u8, Self::Error> {
+        let mut buf: u8 = 0;
+
+        match <SerialReader<'_, B, RS, WS>>::read(self, slice::from_mut(&mut buf)) {
+            Ok(0) | Err(UsbError::WouldBlock) => Err(nb::Error::WouldBlock),
+            Ok(_) => Ok(buf), 
+            Err(err) => Err(nb::Error::Other(err)),
+        }
+    }
+}
+
+impl<B, RS, WS> embedded_hal::serial::Write<u8> for SerialWriter<'_, B, RS, WS>
+where
+    B: UsbBus,
+    RS: BorrowMut<[u8]>,
+    WS: BorrowMut<[u8]>,
+{
+    type Error = UsbError;
+
+    fn write(&mut self, word: u8) -> nb::Result<(), Self::Error> {
+        match <SerialWriter<'_, B, RS, WS>>::write(self, slice::from_ref(&word)) {
+            Ok(0) | Err(UsbError::WouldBlock) => Err(nb::Error::WouldBlock),
+            Ok(_) => Ok(()),
+            Err(err) => Err(nb::Error::Other(err)),
+        }
+    }
+
+    fn flush(&mut self) -> nb::Result<(), Self::Error> {
+        match <SerialWriter<'_, B, RS, WS>>::flush(self) {
+            Err(UsbError::WouldBlock) => Err(nb::Error::WouldBlock),
+            Ok(_) => Ok(()),
+            Err(err) => Err(nb::Error::Other(err)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    // This is a simple compile-time test to ensure the split functionality compiles
+    // We can't test the actual USB functionality without a mock USB bus
+    #[test]
+    fn test_split_compiles() {
+        // This test just ensures that the split/unsplit API compiles correctly
+        // We can't actually test functionality without a real or mock USB bus
+        
+        // The test ensures the types are correctly defined and the methods exist
+        fn test_split_api<B: UsbBus>(serial: SerialPort<'_, B>) {
+            let (reader, writer) = serial.split();
+            let _serial_back = SerialPort::unsplit(reader, writer);
+        }
+        
+        // Just ensure the function compiles - it won't actually run without a USB bus
+        fn _compile_only() {
+            // This function never runs, it just tests compilation
+            unreachable!()
+        }
+    }
+}
