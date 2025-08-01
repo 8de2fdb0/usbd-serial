@@ -25,6 +25,76 @@ const REQ_SET_LINE_CODING: u8 = 0x20;
 const REQ_GET_LINE_CODING: u8 = 0x21;
 const REQ_SET_CONTROL_LINE_STATE: u8 = 0x22;
 
+/// CDC-ACM reader for handling USB OUT endpoint (host to device) communication.
+///
+/// This type manages the read endpoint and provides methods for reading USB packets
+/// from the host.
+pub struct CdcAcmReader<'a, B: UsbBus> {
+    read_ep: EndpointOut<'a, B>,
+}
+
+impl<'a, B: UsbBus> CdcAcmReader<'a, B> {
+    /// Creates a new CdcAcmReader with the provided endpoint.
+    pub fn new(read_ep: EndpointOut<'a, B>) -> Self {
+        Self { read_ep }
+    }
+
+    /// Gets the maximum packet size in bytes.
+    pub fn max_packet_size(&self) -> u16 {
+        self.read_ep.max_packet_size()
+    }
+
+    /// Reads a single packet from the OUT endpoint.
+    pub fn read_packet(&mut self, data: &mut [u8]) -> Result<usize> {
+        self.read_ep.read(data)
+    }
+
+    /// Gets the OUT endpoint.
+    pub fn read_ep(&self) -> &EndpointOut<'a, B> {
+        &self.read_ep
+    }
+
+    /// Mutably gets the OUT endpoint.
+    pub fn read_ep_mut(&mut self) -> &mut EndpointOut<'a, B> {
+        &mut self.read_ep
+    }
+}
+
+/// CDC-ACM writer for handling USB IN endpoint (device to host) communication.
+///
+/// This type manages the write endpoint and provides methods for writing USB packets
+/// to the host.
+pub struct CdcAcmWriter<'a, B: UsbBus> {
+    write_ep: EndpointIn<'a, B>,
+}
+
+impl<'a, B: UsbBus> CdcAcmWriter<'a, B> {
+    /// Creates a new CdcAcmWriter with the provided endpoint.
+    pub fn new(write_ep: EndpointIn<'a, B>) -> Self {
+        Self { write_ep }
+    }
+
+    /// Gets the maximum packet size in bytes.
+    pub fn max_packet_size(&self) -> u16 {
+        self.write_ep.max_packet_size()
+    }
+
+    /// Writes a single packet into the IN endpoint.
+    pub fn write_packet(&mut self, data: &[u8]) -> Result<usize> {
+        self.write_ep.write(data)
+    }
+
+    /// Gets the IN endpoint.
+    pub fn write_ep(&self) -> &EndpointIn<'a, B> {
+        &self.write_ep
+    }
+
+    /// Mutably gets the IN endpoint.
+    pub fn write_ep_mut(&mut self) -> &mut EndpointIn<'a, B> {
+        &mut self.write_ep
+    }
+}
+
 /// Packet level implementation of a CDC-ACM serial port.
 ///
 /// This class can be used directly and it has the least overhead due to directly reading and
@@ -45,8 +115,8 @@ pub struct CdcAcmClass<'a, B: UsbBus> {
     comm_ep: EndpointIn<'a, B>,
     data_if: InterfaceNumber,
     data_if_name: Option<(StringIndex, &'static str)>,
-    read_ep: EndpointOut<'a, B>,
-    write_ep: EndpointIn<'a, B>,
+    reader: CdcAcmReader<'a, B>,
+    writer: CdcAcmWriter<'a, B>,
     line_coding: LineCoding,
     dtr: bool,
     rts: bool,
@@ -73,14 +143,16 @@ impl<'a, B: UsbBus> CdcAcmClass<'a, B> {
     ) -> CdcAcmClass<'a, B> {
         let comm_if_name = comm_if_name.map(|s| (alloc.string(), s));
         let data_if_name = data_if_name.map(|s| (alloc.string(), s));
+        let read_ep = alloc.bulk(max_packet_size);
+        let write_ep = alloc.bulk(max_packet_size);
         CdcAcmClass {
             comm_if: alloc.interface(),
             comm_if_name,
             comm_ep: alloc.interrupt(8, 255),
             data_if: alloc.interface(),
             data_if_name,
-            read_ep: alloc.bulk(max_packet_size),
-            write_ep: alloc.bulk(max_packet_size),
+            reader: CdcAcmReader::new(read_ep),
+            writer: CdcAcmWriter::new(write_ep),
             line_coding: LineCoding {
                 stop_bits: StopBits::One,
                 data_bits: 8,
@@ -95,7 +167,7 @@ impl<'a, B: UsbBus> CdcAcmClass<'a, B> {
     /// Gets the maximum packet size in bytes.
     pub fn max_packet_size(&self) -> u16 {
         // The size is the same for both endpoints.
-        self.read_ep.max_packet_size()
+        self.reader.max_packet_size()
     }
 
     /// Gets the current line coding. The line coding contains information that's mainly relevant
@@ -116,32 +188,52 @@ impl<'a, B: UsbBus> CdcAcmClass<'a, B> {
 
     /// Writes a single packet into the IN endpoint.
     pub fn write_packet(&mut self, data: &[u8]) -> Result<usize> {
-        self.write_ep.write(data)
+        self.writer.write_packet(data)
     }
 
     /// Reads a single packet from the OUT endpoint.
     pub fn read_packet(&mut self, data: &mut [u8]) -> Result<usize> {
-        self.read_ep.read(data)
+        self.reader.read_packet(data)
     }
 
     /// Gets the IN endpoint.
     pub fn write_ep(&self) -> &EndpointIn<'a, B> {
-        &self.write_ep
+        self.writer.write_ep()
     }
 
     /// Mutably gets the IN endpoint.
     pub fn write_ep_mut(&mut self) -> &mut EndpointIn<'a, B> {
-        &mut self.write_ep
+        self.writer.write_ep_mut()
     }
 
     /// Gets the OUT endpoint.
     pub fn read_ep(&self) -> &EndpointOut<'a, B> {
-        &self.read_ep
+        self.reader.read_ep()
     }
 
     /// Mutably gets the OUT endpoint.
     pub fn read_ep_mut(&mut self) -> &mut EndpointOut<'a, B> {
-        &mut self.read_ep
+        self.reader.read_ep_mut()
+    }
+
+    /// Gets a reference to the reader.
+    pub fn reader(&self) -> &CdcAcmReader<'a, B> {
+        &self.reader
+    }
+
+    /// Gets a mutable reference to the reader.
+    pub fn reader_mut(&mut self) -> &mut CdcAcmReader<'a, B> {
+        &mut self.reader
+    }
+
+    /// Gets a reference to the writer.
+    pub fn writer(&self) -> &CdcAcmWriter<'a, B> {
+        &self.writer
+    }
+
+    /// Gets a mutable reference to the writer.
+    pub fn writer_mut(&mut self) -> &mut CdcAcmWriter<'a, B> {
+        &mut self.writer
     }
 }
 
@@ -211,8 +303,8 @@ impl<B: UsbBus> UsbClass<B> for CdcAcmClass<'_, B> {
             self.data_if_name.map(|n| n.0),
         )?;
 
-        writer.endpoint(&self.write_ep)?;
-        writer.endpoint(&self.read_ep)?;
+        writer.endpoint(&self.writer.write_ep)?;
+        writer.endpoint(&self.reader.read_ep)?;
 
         Ok(())
     }
