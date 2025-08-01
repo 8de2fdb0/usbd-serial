@@ -117,14 +117,14 @@ impl<Bus: UsbBus, RS: BorrowMut<[u8]>> embedded_io::ReadReady
     }
 }
 
-impl<Bus: UsbBus, WS: BorrowMut<[u8]>> embedded_io::ErrorType
-    for crate::serial_port::SerialWriter<'_, Bus, WS>
+impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io::ErrorType
+    for crate::serial_port::SerialWriter<'_, Bus, RS, WS>
 {
     type Error = Error;
 }
 
-impl<Bus: UsbBus, WS: BorrowMut<[u8]>> embedded_io::Write
-    for crate::serial_port::SerialWriter<'_, Bus, WS>
+impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io::Write
+    for crate::serial_port::SerialWriter<'_, Bus, RS, WS>
 {
     fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         if buf.is_empty() {
@@ -147,8 +147,8 @@ impl<Bus: UsbBus, WS: BorrowMut<[u8]>> embedded_io::Write
     }
 }
 
-impl<Bus: UsbBus, WS: BorrowMut<[u8]>> embedded_io::WriteReady
-    for crate::serial_port::SerialWriter<'_, Bus, WS>
+impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io::WriteReady
+    for crate::serial_port::SerialWriter<'_, Bus, RS, WS>
 {
     fn write_ready(&mut self) -> Result<bool, Self::Error> {
         Ok(self.available_write() != 0)

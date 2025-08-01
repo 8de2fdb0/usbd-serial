@@ -50,21 +50,23 @@ where
     B: UsbBus,
     RS: BorrowMut<[u8]>,
 {
-    inner: NonNull<CdcAcmClass<'a, B>>,
+    read_ep: NonNull<EndpointOut<'a, B>>,
     read_buf: Buffer<RS>,
-    _phantom: PhantomData<&'a mut CdcAcmClass<'a, B>>,
+    _phantom: PhantomData<&'a mut EndpointOut<'a, B>>,
 }
 
 /// USB serial port writer that only handles writing operations.
-pub struct SerialWriter<'a, B, WS = DefaultBufferStore>
+pub struct SerialWriter<'a, B, RS = DefaultBufferStore, WS = DefaultBufferStore>
 where
     B: UsbBus,
+    RS: BorrowMut<[u8]>,
     WS: BorrowMut<[u8]>,
 {
-    inner: NonNull<CdcAcmClass<'a, B>>,
+    inner: CdcAcmClass<'a, B>,
+    // We keep this for type compatibility but don't use it since the reader has the actual read buffer  
+    _read_buf: core::marker::PhantomData<Buffer<RS>>,
     write_buf: Buffer<WS>,
     write_state: WriteState,
-    _phantom: PhantomData<&'a mut CdcAcmClass<'a, B>>,
 }
 
 impl<'a, B> SerialPort<'a, B>
@@ -264,28 +266,22 @@ where
     /// This allows independent access to reading and writing functionality.
     /// The original SerialPort is consumed and cannot be used afterwards.
     /// 
-    /// # Safety
-    /// 
-    /// The returned reader and writer share access to the underlying USB endpoints.
-    /// They must be used carefully to avoid conflicting operations. The reader and 
-    /// writer should not outlive the scope where they were created.
-    pub fn split(self) -> (SerialReader<'a, B, RS>, SerialWriter<'a, B, WS>) {
-        use core::mem::ManuallyDrop;
-        
-        let mut self_manual = ManuallyDrop::new(self);
-        let inner_ptr = NonNull::from(&mut self_manual.inner);
+    /// The SerialWriter owns all the SerialPort fields while the SerialReader
+    /// only gets a pointer to the read endpoint.
+    pub fn split(mut self) -> (SerialReader<'a, B, RS>, SerialWriter<'a, B, RS, WS>) {
+        let read_ep_ptr = NonNull::from(self.inner.read_ep_mut());
         
         let reader = SerialReader {
-            inner: inner_ptr,
-            read_buf: unsafe { core::ptr::read(&self_manual.read_buf) },
+            read_ep: read_ep_ptr,
+            read_buf: self.read_buf,
             _phantom: PhantomData,
         };
         
         let writer = SerialWriter {
-            inner: inner_ptr,
-            write_buf: unsafe { core::ptr::read(&self_manual.write_buf) },
-            write_state: unsafe { core::ptr::read(&self_manual.write_state) },
-            _phantom: PhantomData,
+            inner: self.inner,
+            _read_buf: PhantomData,
+            write_buf: self.write_buf, 
+            write_state: self.write_state,
         };
         
         (reader, writer)
@@ -379,10 +375,10 @@ where
 {
     /// Poll the endpoint and try to put packets into the read buffer.
     pub fn poll(&mut self) -> Result<()> {
-        let inner = unsafe { self.inner.as_mut() };
+        let read_ep = unsafe { self.read_ep.as_mut() };
         
-        self.read_buf.write_all(inner.max_packet_size() as usize, |buf_data| {
-            match inner.read_packet(buf_data) {
+        self.read_buf.write_all(read_ep.max_packet_size() as usize, |buf_data| {
+            match read_ep.read(buf_data) {
                 Ok(c) => Ok(c),
                 Err(UsbError::WouldBlock) => Ok(0),
                 Err(err) => Err(err),
@@ -415,21 +411,6 @@ where
         })
     }
 
-    /// Gets the current line coding.
-    pub fn line_coding(&self) -> &LineCoding {
-        unsafe { self.inner.as_ref().line_coding() }
-    }
-
-    /// Gets the DTR (data terminal ready) state
-    pub fn dtr(&self) -> bool {
-        unsafe { self.inner.as_ref().dtr() }
-    }
-
-    /// Gets the RTS (request to send) state
-    pub fn rts(&self) -> bool {
-        unsafe { self.inner.as_ref().rts() }
-    }
-
     /// Gets the number of bytes available for reading
     pub fn available_read(&self) -> usize {
         self.read_buf.available_read()
@@ -454,9 +435,10 @@ where
     }
 }
 
-impl<'a, B, WS> SerialWriter<'a, B, WS>
+impl<'a, B, RS, WS> SerialWriter<'a, B, RS, WS>
 where
     B: UsbBus,
+    RS: BorrowMut<[u8]>,
     WS: BorrowMut<[u8]>,
 {
     /// Writes bytes from `data` into the port and returns the number of bytes written.
@@ -490,7 +472,7 @@ where
     /// that even if this method returns `Ok`, data may still be in hardware buffers on either side.
     pub fn flush(&mut self) -> Result<()> {
         let buf = &mut self.write_buf;
-        let inner = unsafe { self.inner.as_mut() };
+        let inner = &mut self.inner;
         let write_state = &mut self.write_state;
 
         let full_count = match *write_state {
@@ -540,34 +522,61 @@ where
 
     /// Gets the current line coding.
     pub fn line_coding(&self) -> &LineCoding {
-        unsafe { self.inner.as_ref().line_coding() }
+        self.inner.line_coding()
     }
 
     /// Gets the DTR (data terminal ready) state
     pub fn dtr(&self) -> bool {
-        unsafe { self.inner.as_ref().dtr() }
+        self.inner.dtr()
     }
 
     /// Gets the RTS (request to send) state
     pub fn rts(&self) -> bool {
-        unsafe { self.inner.as_ref().rts() }
+        self.inner.rts()
     }
 
     /// Gets the number of bytes available for writing
     pub fn available_write(&self) -> usize {
         self.write_buf.available_write()
     }
+
+    /// Joins the SerialWriter with a SerialReader back into a SerialPort.
+    /// 
+    /// # Safety
+    /// 
+    /// This function is unsafe because it assumes that the reader was created 
+    /// from the same original SerialPort split() call and that the read endpoint
+    /// pointer is still valid. The caller must ensure that:
+    /// 
+    /// 1. The reader was created from the same SerialPort::split() call as this writer
+    /// 2. No other references to the read endpoint exist
+    /// 3. The reader has not been moved or copied incorrectly
+    pub unsafe fn join(mut self, reader: SerialReader<'a, B, RS>) -> SerialPort<'a, B, RS, WS> {
+        // Verify that the reader's endpoint pointer points to our inner's read endpoint
+        assert_eq!(reader.read_ep.as_ptr(), self.inner.read_ep_mut() as *mut _);
+        
+        let reader_manual = core::mem::ManuallyDrop::new(reader);
+        let read_buf = core::ptr::read(&reader_manual.read_buf);
+        
+        SerialPort {
+            inner: self.inner,
+            read_buf,
+            write_buf: self.write_buf,
+            write_state: self.write_state,
+        }
+    }
 }
 
-impl<B, WS> embedded_hal::serial::Write<u8> for SerialWriter<'_, B, WS>
+impl<B, RS, WS> embedded_hal::serial::Write<u8> for SerialWriter<'_, B, RS, WS>
 where
     B: UsbBus,
+    RS: BorrowMut<[u8]>,
     WS: BorrowMut<[u8]>,
 {
     type Error = UsbError;
 
     fn write(&mut self, word: u8) -> nb::Result<(), Self::Error> {
-        match <SerialWriter<'_, B, WS>>::write(self, slice::from_ref(&word)) {
+        match <SerialWriter<'_, B, RS, WS>>::write(self, slice::from_ref(&word)) {
             Ok(0) | Err(UsbError::WouldBlock) => Err(nb::Error::WouldBlock),
             Ok(_) => Ok(()),
             Err(err) => Err(nb::Error::Other(err)),
@@ -575,7 +584,7 @@ where
     }
 
     fn flush(&mut self) -> nb::Result<(), Self::Error> {
-        match <SerialWriter<'_, B, WS>>::flush(self) {
+        match <SerialWriter<'_, B, RS, WS>>::flush(self) {
             Err(UsbError::WouldBlock) => Err(nb::Error::WouldBlock),
             Ok(_) => Ok(()),
             Err(err) => Err(nb::Error::Other(err)),
@@ -583,46 +592,7 @@ where
     }
 }
 
-/// Joins a SerialReader and SerialWriter back into a SerialPort.
-/// 
-/// # Safety
-/// 
-/// This function is unsafe because it assumes that the reader and writer
-/// were created from the same original SerialPort and that the underlying
-/// CdcAcmClass is still valid. The caller must ensure that:
-/// 
-/// 1. The reader and writer were created from the same SerialPort::split() call
-/// 2. No other references to the underlying CdcAcmClass exist
-/// 3. The reader and writer have not been moved or copied incorrectly
-pub unsafe fn join<'a, B, RS, WS>(
-    reader: SerialReader<'a, B, RS>,
-    writer: SerialWriter<'a, B, WS>,
-) -> SerialPort<'a, B, RS, WS>
-where
-    B: UsbBus,
-    RS: BorrowMut<[u8]>,
-    WS: BorrowMut<[u8]>,
-{
-    use core::mem::ManuallyDrop;
-    
-    // Verify that both reader and writer point to the same CdcAcmClass
-    assert_eq!(reader.inner.as_ptr(), writer.inner.as_ptr());
-    
-    let reader_manual = ManuallyDrop::new(reader);
-    let writer_manual = ManuallyDrop::new(writer);
-    
-    let inner = core::ptr::read(reader_manual.inner.as_ptr());
-    let read_buf = core::ptr::read(&reader_manual.read_buf);
-    let write_buf = core::ptr::read(&writer_manual.write_buf);
-    let write_state = core::ptr::read(&writer_manual.write_state);
-    
-    SerialPort {
-        inner,
-        read_buf,
-        write_buf,
-        write_state,
-    }
-}
+
 
 #[cfg(test)]
 mod tests {

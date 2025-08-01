@@ -34,8 +34,8 @@
 //!     Err(_) => { /* handle error */ },
 //! }
 //!
-//! // If needed, rejoin them back into a SerialPort
-//! let rejoined = unsafe { usbd_serial::join(reader, writer) };
+//! // If needed, rejoin them back into a SerialPort using the join method on writer
+//! let rejoined = unsafe { writer.join(reader) };
 //! # }
 //! ```
 //!
