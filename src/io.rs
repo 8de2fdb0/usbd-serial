@@ -85,3 +85,72 @@ impl<Bus: UsbBus, RS: BorrowMut<[u8]>, WS: BorrowMut<[u8]>> embedded_io::WriteRe
         Ok(self.write_buf.available_write() != 0)
     }
 }
+
+impl<Bus: UsbBus, RS: BorrowMut<[u8]>> embedded_io::ErrorType
+    for crate::serial_port::SerialReader<'_, Bus, RS>
+{
+    type Error = Error;
+}
+
+impl<Bus: UsbBus, RS: BorrowMut<[u8]>> embedded_io::Read
+    for crate::serial_port::SerialReader<'_, Bus, RS>
+{
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+        loop {
+            match self.read(buf).map_err(From::from) {
+                // We are required by `embedded-io` to continue reading until at least one byte is
+                // read.
+                Ok(0) => {}
+                Err(usb_device::UsbError::WouldBlock) => {}
+                other => return Ok(other?),
+            }
+        }
+    }
+}
+
+impl<Bus: UsbBus, RS: BorrowMut<[u8]>> embedded_io::ReadReady
+    for crate::serial_port::SerialReader<'_, Bus, RS>
+{
+    fn read_ready(&mut self) -> Result<bool, Self::Error> {
+        self.poll()?;
+        Ok(self.available_read() != 0)
+    }
+}
+
+impl<Bus: UsbBus, WS: BorrowMut<[u8]>> embedded_io::ErrorType
+    for crate::serial_port::SerialWriter<'_, Bus, WS>
+{
+    type Error = Error;
+}
+
+impl<Bus: UsbBus, WS: BorrowMut<[u8]>> embedded_io::Write
+    for crate::serial_port::SerialWriter<'_, Bus, WS>
+{
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        loop {
+            match self.write(buf) {
+                // We are required by `embedded-io` to continue writing until at least one byte is
+                // written.
+                Ok(0) => {}
+                Err(usb_device::UsbError::WouldBlock) => {}
+                other => return Ok(other?),
+            }
+        }
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.flush().map_err(From::from)
+    }
+}
+
+impl<Bus: UsbBus, WS: BorrowMut<[u8]>> embedded_io::WriteReady
+    for crate::serial_port::SerialWriter<'_, Bus, WS>
+{
+    fn write_ready(&mut self) -> Result<bool, Self::Error> {
+        Ok(self.available_write() != 0)
+    }
+}

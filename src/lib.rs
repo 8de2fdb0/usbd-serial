@@ -7,6 +7,38 @@
 //! The crate also contains [`CdcAcmClass`] which is a lower-level implementation that
 //! has less overhead, but requires more care to use correctly.
 //!
+//! ## Split Functionality
+//!
+//! The [`SerialPort`] can be split into separate [`SerialReader`] and [`SerialWriter`] types
+//! using the [`SerialPort::split`] method. This allows independent access to reading and writing
+//! functionality, which can be useful for passing to different parts of code or different tasks.
+//!
+//! ```no_run
+//! # use usb_device::class_prelude::*;
+//! # fn dummy(usb_bus: UsbBusAllocator<impl UsbBus>) {
+//! use usb_device::prelude::*;
+//! use usbd_serial::{SerialPort, USB_CLASS_CDC};
+//!
+//! let serial = SerialPort::new(&usb_bus);
+//! let (mut reader, mut writer) = serial.split();
+//!
+//! // Use reader and writer independently
+//! let mut buf = [0u8; 64];
+//! match reader.read(&mut buf) {
+//!     Ok(count) => { /* process read data */ },
+//!     Err(_) => { /* handle error */ },
+//! }
+//!
+//! match writer.write(b"Hello") {
+//!     Ok(count) => { /* data written */ },
+//!     Err(_) => { /* handle error */ },
+//! }
+//!
+//! // If needed, rejoin them back into a SerialPort
+//! let rejoined = unsafe { usbd_serial::join(reader, writer) };
+//! # }
+//! ```
+//!
 //! Example
 //! =======
 //!
